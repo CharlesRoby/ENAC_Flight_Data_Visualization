@@ -1,0 +1,437 @@
+<!-- OPEN ON FIREFOX -->
+<html>
+<head>
+    <title>TP DataViz</title>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="myData" style="display: none;"></div>
+    <div class="panel">
+        <canvas id="myExample" width="1050" height="1050">
+            Your browser does not support the canvas element.
+        </canvas>
+    </div>
+    <!-- Range slider -->
+    <div class="panel">
+        Transparence :
+        <input type="range" min="0" max="100" value="100" class="slider" id="myRangeTransparency">
+        Couleur :
+        <input type="range" min="0" max="100" value="50" class="slider" id="myRangeColor">
+        Interpolation :
+        <input type="range" min="0" max="100" value="0" class="slider" id="myRangeInterpolation">
+        Afficher les particules
+        <input type="checkbox" id="toggleParticles" checked>
+    </div>
+    <!-- Double range slider -->
+    <div class="range">
+        Filtrage des données Min et/ou Max :
+        <div class="range-slider">
+            <span class="range-selected"></span>
+        </div>
+        <div class="range-input">
+            <input type="range" class="min" min="0" max="1000" value="0" step="1">
+            <input type="range" class="max" min="0" max="1000" value="1000" step="1">
+        </div>
+    </div>
+    <script src="dataBig.js"></script>
+    <script>
+        //Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+        var lines = mydata.split("\n");
+        var rawPoints = lines.map(function(line) {
+            var parts = line.split(';');
+            return {
+                id: parseInt(parts[0]),
+                time: parseFloat(parts[1]),
+                x: parseFloat(parts[2]),
+                y: parseFloat(parts[3]),
+                z: parseFloat(parts[4])
+            };
+        });
+        points = normalizePoints(rawPoints);
+
+        var minZ = Math.min(...points.map(p => p.z));
+        var maxZ = Math.max(...points.map(p => p.z));
+        var zThreshold = (minZ + maxZ) / 2;
+
+        draw();
+        animate();
+        });
+
+
+        //DOUBLE RANGE SLIDER
+        var minZThreshold = 0;
+        var maxZThreshold = 1000; 
+
+        let rangeMin = 20;
+        const range = document.querySelector(".range-selected");
+        const rangeInput = document.querySelectorAll(".range-input input");
+
+        rangeInput.forEach(input => {
+            input.addEventListener("input", e => {
+                let minVal = parseInt(rangeInput[0].value);
+                let maxVal = parseInt(rangeInput[1].value);
+
+                let minRange = minVal / 1000;
+                let maxRange = maxVal / 1000; 
+
+                minZThreshold = minRange;
+                maxZThreshold = maxRange;
+
+                if ((maxVal - minVal) < rangeMin) { // Vérification pour le minimum range
+                    if (e.target.className === "min") {
+                        rangeInput[0].value = maxVal - rangeMin;
+                        minRange = (maxVal - rangeMin) / 1000;
+                    } else {
+                        rangeInput[1].value = minVal + rangeMin;
+                        maxRange = (minVal + rangeMin) / 1000;
+                    }
+                }
+
+                // Mise à jour de la bande bleue
+                range.style.left = (minRange * 100) + "%";
+                range.style.right = 100 - (maxRange * 100) + "%";
+
+                draw();
+            });
+        });
+
+
+        // SLIDER COLOR
+        var colorThreshold = 0.5; // Valeur initiale, change avec le slider
+
+        var sliderColor = document.getElementById("myRangeColor");
+        sliderColor.oninput = function() {
+            colorThreshold = this.value / 100;
+            console.log("Color Threshold:", colorThreshold);
+            draw();
+        }
+
+
+        // Traitement pour le slider de l'interpolation
+        var interpolation = 0;
+        var sliderInterpolation = document.getElementById("myRangeInterpolation");
+        sliderInterpolation.oninput = function() {
+            interpolation = this.value / 100;
+            console.log("Interpolation:", interpolation);
+            draw();
+        }
+
+
+        // Traitement pour le slider de transparency
+        var transparency = 1;
+        var sliderTransparency = document.getElementById("myRangeTransparency");
+        sliderTransparency.oninput = function() {
+            transparency = this.value / 100;
+            console.log("Transparency:", transparency);
+            draw();
+        }
+
+
+        // Traitement des données 
+        var canvas = document.getElementById("myExample");
+        var ctx = canvas.getContext("2d");
+
+        var lines = mydata.split("\n");
+        var points = lines.map(function(line) {
+            var parts = line.split(';');
+            return {
+                id: parseInt(parts[0]),
+                time: parseFloat(parts[1]),
+                x: parseFloat(parts[2]),
+                y: parseFloat(parts[3]),
+                z: parseFloat(parts[4])
+            };
+        });
+
+        function normalizePoints(rawPoints) {
+            var minX = Math.min(...rawPoints.map(p => p.x));
+            var maxX = Math.max(...rawPoints.map(p => p.x));
+            var minY = Math.min(...rawPoints.map(p => p.y));
+            var maxY = Math.max(...rawPoints.map(p => p.y));
+            var minZ = Math.min(...rawPoints.map(p => p.z));
+            var maxZ = Math.max(...rawPoints.map(p => p.z));
+
+            return rawPoints.map(function(point) {
+                return {
+                    id: point.id,
+                    time: point.time,
+                    x: (point.x - minX) / (maxX - minX),
+                    y: (point.y - minY) / (maxY - minY),
+                    z: (point.z - minZ) / (maxZ - minZ)
+                };
+            });
+        }
+
+        var rawPoints = lines.map(function(line) {
+            var parts = line.split(';');
+            return {
+                id: parseInt(parts[0]),
+                time: parseFloat(parts[1]),
+                x: parseFloat(parts[2]),
+                y: parseFloat(parts[3]),
+                z: parseFloat(parts[4])
+            };
+        });
+        points = normalizePoints(rawPoints);
+
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+
+        // VARIABLE ET FONCTION POUR LE PAN 
+        var pan = { x: 0, y: 0 };
+        var zoomFactor = 1;
+        
+        // Gestionnaires d'événements pour le Pan
+        canvas.addEventListener('mousedown', function(e) {
+            isPanning = true;
+            startX = e.clientX - canvas.offsetLeft;
+            startY = e.clientY - canvas.offsetTop;
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (!isPanning) return;
+            var x = e.clientX - canvas.offsetLeft;
+            var y = e.clientY - canvas.offsetTop;
+            pan.x += x - startX;
+            pan.y += y - startY;
+            startX = x;
+            startY = y;
+            draw();
+        });
+
+        canvas.addEventListener('mouseup', function() { isPanning = false; });
+        canvas.addEventListener('mouseleave', function() { isPanning = false; });
+
+        // VARIABLE ET FONCTION POUR LE ZOOM 
+        var zoomSpeed = 0.1;
+        var zoomFactor = 1;
+
+        function zoomOnScreen(event) {
+            event.preventDefault();
+
+            var rect = canvas.getBoundingClientRect();
+            var mouseX = event.clientX - rect.left;
+            var mouseY = event.clientY - rect.top;
+
+            var zoomDirection = event.deltaY > 0 ? -1 : 1;
+            var factor = Math.pow(1 + zoomSpeed, zoomDirection);
+
+            pan.x = (1 - factor) * mouseX + factor * pan.x;
+            pan.y = (1 - factor) * mouseY + factor * pan.y;
+            zoomFactor *= factor;
+
+            draw();
+        }
+
+        canvas.addEventListener('wheel', zoomOnScreen);
+
+
+        // PARTICULES
+        var showParticles = true;
+
+        document.getElementById('toggleParticles').addEventListener('change', function() {
+            showParticles = this.checked;
+            draw();
+        });
+
+
+        // Structure de la particule mise à jour avec l'index du segment de ligne
+        function Particle(x, y, z, speed, lineIndex) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.speed = speed;
+            this.lineIndex = lineIndex; // Nouveau: Index du segment de ligne actuel
+            this.color = "rgba(255, 0, 0, 1)"; // rouge par défaut
+        }
+
+        // Ajout d'une nouvelle variable pour stocker les segments de ligne
+        var segments = [];
+
+        function createSegments(points) {
+            for (let i = 1; i < points.length; i++) {
+                if (points[i].id === points[i - 1].id) {
+                    segments.push({
+                        startX: points[i - 1].x,
+                        startY: points[i - 1].y,
+                        startZ: points[i - 1].z, 
+                        endX: points[i].x,
+                        endY: points[i].y,
+                        endZ: points[i].z
+                    });
+                }
+            }
+        }
+
+
+        // Création des segments à partir des points
+        createSegments(points);
+
+        // Initialisation des particules
+        var particles = [];
+        for (let i = 0; i < segments.length; i++) {
+            particles.push(new Particle(
+                segments[i].startX,
+                segments[i].startY,
+                0, // Z n'est pas utilisé pour le mouvement dans ce cas
+                0.005, // Vitesse normalisée
+                i // Index de départ du segment
+            ));
+        }
+
+
+        // Mise à jour des particules
+        function updateParticles() {
+            particles.forEach(particle => {
+                let segment = segments[particle.lineIndex];
+                let dx = segment.endX - segment.startX;
+                let dy = segment.endY - segment.startY;
+                let dz = segment.endZ - segment.startZ;
+
+                let distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                let dirX = dx / distance;
+                let dirY = dy / distance;
+                let dirZ = dz / distance;
+
+                // Met à jour la position de la particule
+                particle.x += dirX * particle.speed;
+                particle.y += dirY * particle.speed * (1 - interpolation); // Utilise l'interpolation pour mélanger entre Y et Z
+                particle.z += dirZ * particle.speed * interpolation;
+
+                // Vérifie si la particule a atteint ou dépassé la fin du segment
+                if ((dirX > 0 && particle.x > segment.endX) || 
+                    (dirY > 0 && particle.y > segment.endY) ||
+                    (dirZ > 0 && particle.z > segment.endZ) || // Condition pour Z
+                    (dirX < 0 && particle.x < segment.endX) || 
+                    (dirY < 0 && particle.y < segment.endY) ||
+                    (dirZ < 0 && particle.z < segment.endZ)) { // Condition pour Z
+                    // Passe au segment suivant ou boucle
+                    particle.lineIndex = (particle.lineIndex + 1) % segments.length;
+                    particle.x = segments[particle.lineIndex].startX;
+                    particle.y = segments[particle.lineIndex].startY;
+                    particle.z = segments[particle.lineIndex].startZ; // Réinitialise Z
+                }
+            });
+        }
+
+
+        // Dessin des particules
+        function drawParticles() {
+            // Ne dessine les particules que si le slider est complètement à gauche (0) ou à droite (1)
+            if (interpolation === 0 || interpolation === 1) {
+                particles.forEach(particle => {
+                    var posX = particle.x * canvas.width * zoomFactor + pan.x;
+                    var posY;
+
+                    if (interpolation === 0) {
+                        posY = (1 - particle.y) * canvas.height * zoomFactor + pan.y; // Mouvement en XY
+                    } else {
+                        posY = (1 - particle.z) * canvas.height * zoomFactor + pan.y; // Mouvement en XZ
+                    }
+
+                    ctx.fillStyle = particle.color;
+                    ctx.beginPath();
+                    ctx.arc(posX, posY, 1, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+        }
+
+
+        // Fonction pour calculer la couleur interpolée
+        function interpolateColor(z, colorThreshold, colorLowZ, colorHighZ) {
+            var offset = (colorThreshold - 0.5) * 2;
+            var adjustedZ = z + offset;
+            adjustedZ = Math.max(0, Math.min(adjustedZ, 1));
+
+            var color1 = colorLowZ.match(/\d+/g).map(Number);
+            var color2 = colorHighZ.match(/\d+/g).map(Number);
+
+            var r = Math.round(color1[0] * (1 - adjustedZ) + color2[0] * adjustedZ);
+            var g = Math.round(color1[1] * (1 - adjustedZ) + color2[1] * adjustedZ);
+            var b = Math.round(color1[2] * (1 - adjustedZ) + color2[2] * adjustedZ);
+
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+
+        // Fonction pour générer une couleur avec la transparence
+        function getColorWithTransparency(color, transparency) {
+            var rgba = color.match(/\d+/g); // Extrait les composantes RGB
+            return `rgba(${rgba[0]}, ${rgba[1]}, ${rgba[2]}, ${transparency})`;
+        }
+
+        // Définissez les couleurs et le seuil
+        var colorHighZ = "rgba(0, 255, 0, 1)"; // Vert pour les valeurs élevées de z
+        var colorLowZ = "rgba(0, 0, 255, 1)"; // Bleu pour les valeurs basses de z
+        var zThreshold = (minZ + maxZ) / 2; // Seuil basé sur la moyenne des valeurs de z
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            for (let i = 1; i < points.length; i++) {
+                let point = points[i];
+                let prev = points[i - 1];
+
+                // Vérifie si le point actuel et le point précédent appartiennent au même trajet
+                if (point.id === prev.id) {
+                    // Vérifie si les deux points sont dans les limites de Z définies par les curseurs
+                    if ((point.z >= minZThreshold && point.z <= maxZThreshold) &&
+                        (prev.z >= minZThreshold && prev.z <= maxZThreshold)) {
+
+                        // Calcule les positions de début et de fin
+                        var startX = prev.x * canvas.width * zoomFactor + pan.x;
+                        var startY = (1 - prev.y) * canvas.height * zoomFactor + pan.y;
+                        var endX = point.x * canvas.width * zoomFactor + pan.x;
+                        var endY = (1 - point.y) * canvas.height * zoomFactor + pan.y;
+
+                        // Applique l'interpolation si nécessaire
+                        if (interpolation > 0) {
+                            var startZ = (1 - prev.z) * canvas.height;
+                            var endZ = (1 - point.z) * canvas.height;
+
+                            startX = lerp(startX, prev.x * canvas.width, interpolation) * zoomFactor + pan.x;
+                            startY = lerp(startY, startZ, interpolation) * zoomFactor + pan.y;
+                            endX = lerp(endX, point.x * canvas.width, interpolation) * zoomFactor + pan.x;
+                            endY = lerp(endY, endZ, interpolation) * zoomFactor + pan.y;
+                        }
+
+                        // Gestion de la couleur avec le slider
+                        var zPosition = (point.z + prev.z) / 2;
+                        var strokeColor = interpolateColor(zPosition, colorThreshold, "rgba(0, 255, 0, 1)", "rgba(0, 0, 255, 1)");
+                        ctx.strokeStyle = getColorWithTransparency(strokeColor, transparency);
+
+
+                        // Dessiner la ligne
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+
+        // Fonction pour lancer la boucle d'animation
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Efface le canevas
+            draw(); // Dessine les autres éléments
+            updateParticles(); // Met à jour les positions des particules
+            if (showParticles) {
+                drawParticles(); // Dessine les particules si showParticles est true
+            }
+            requestAnimationFrame(animate); // Planifie la prochaine mise à jour
+        }
+    </script> 
+</body>
+</html>
+
+
+
